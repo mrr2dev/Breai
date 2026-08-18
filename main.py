@@ -199,17 +199,22 @@ async def handle_message(
     # ========================================================
 
     is_reply_to_bot = False
+replied_message = None
 
-    replied_message = None
+if update.message.reply_to_message:
+    replied_message = update.message.reply_to_message
 
-    if update.message.reply_to_message:
+    if replied_message.from_user:
+        if replied_message.from_user.is_bot:
+            is_reply_to_bot = True
 
-        replied_message = update.message.reply_to_message
-
-        if replied_message.from_user:
-
-            if replied_message.from_user.id == bot_id:
-                is_reply_to_bot = True
+        if (
+            bot_username
+            and replied_message.from_user.username
+            and replied_message.from_user.username.lower()
+            == bot_username.lower()
+        ):
+            is_reply_to_bot = True
 
 
     # ========================================================
