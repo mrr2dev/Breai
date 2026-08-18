@@ -5,15 +5,14 @@ from openai import OpenAI
 from telegram import Update
 from telegram.ext import (
     Application,
-    MessageHandler,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
     filters,
 )
 
-
 # ============================================================
-# ENVIRONMENTs
+# ENVIRONMENT
 # ============================================================
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -35,14 +34,12 @@ Gaya bicara:
 - Boleh menggunakan wkwk dan emoji seperlunya.
 - Jangan terlalu formal.
 - Jawab langsung ke inti.
-- Kalau user sedang membahas Kallani, pahami bahwa Kallani adalah
+- Kalau sedang membahas Kallani, pahami bahwa Kallani adalah
   project yang sedang dibangun user.
 - Jangan mengarang data.
-- Kalau informasi tidak tersedia atau tidak yakin, katakan dengan jujur.
-- Bedakan antara fakta, asumsi, proyeksi, dan opini.
-- Kalau user memberikan angka atau data, gunakan angka tersebut
-  sebagai konteks percakapan.
-- Kalau pertanyaan merupakan lanjutan dari pembahasan sebelumnya,
+- Kalau tidak yakin, katakan dengan jujur.
+- Bedakan fakta, asumsi, proyeksi, dan opini.
+- Kalau pertanyaan merupakan lanjutan pembahasan sebelumnya,
   jangan mengulang dari nol. Lanjutkan topiknya.
 """
 
@@ -50,19 +47,6 @@ Gaya bicara:
 # ============================================================
 # CONVERSATION MEMORY
 # ============================================================
-
-# Memory disimpan berdasarkan chat/grup Telegram.
-#
-# Contoh:
-#
-# chat_id grup A
-#   ↓
-# pertanyaan 1
-# jawaban 1
-# pertanyaan 2
-# jawaban 2
-#
-# Memory dibatasi agar tidak terus membesar.
 
 MAX_MEMORY_MESSAGES = 20
 
@@ -72,22 +56,15 @@ conversation_memory = defaultdict(
 
 
 # ============================================================
-# SPLIT LONG TELEGRAM MESSAGE
+# SEND LONG MESSAGE
 # ============================================================
 
 async def send_long_message(message, text, max_length=4000):
-    """
-    Telegram mempunyai batas panjang pesan.
-    Kalau jawaban AI terlalu panjang, kita pecah
-    menjadi beberapa pesan.
-    """
-
     if not text:
         return
 
     for i in range(0, len(text), max_length):
         chunk = text[i:i + max_length]
-
         await message.reply_text(chunk)
 
 
@@ -96,51 +73,47 @@ async def send_long_message(message, text, max_length=4000):
 # ============================================================
 
 def build_conversation_input(chat_id, current_question):
-    """
-    Menggabungkan memory percakapan sebelumnya
-    dengan pertanyaan terbaru.
-    """
 
     history = conversation_memory[chat_id]
 
     conversation_text = ""
 
     if history:
+
         conversation_text += """
-Berikut adalah percakapan sebelumnya dalam thread/grup ini.
-Gunakan sebagai konteks untuk memahami pertanyaan terbaru.
+Berikut adalah percakapan sebelumnya.
+Gunakan percakapan ini sebagai konteks untuk memahami
+pertanyaan terbaru.
 
 """
 
         for item in history:
-            role = item["role"]
-            content = item["content"]
 
-            if role == "user":
-                conversation_text += f"USER:\n{content}\n\n"
+            if item["role"] == "user":
+                conversation_text += (
+                    f"USER:\n{item['content']}\n\n"
+                )
 
-            elif role == "assistant":
-                conversation_text += f"BRE AI:\n{content}\n\n"
+            elif item["role"] == "assistant":
+                conversation_text += (
+                    f"BRE AI:\n{item['content']}\n\n"
+                )
 
-    conversation_text += f"""
-PERTANYAAN TERBARU USER:
-{current_question}
-"""
+    conversation_text += (
+        f"PERTANYAAN TERBARU USER:\n{current_question}"
+    )
 
     return conversation_text
 
 
 # ============================================================
-# HANDLE /CLEAR
+# CLEAR MEMORY
 # ============================================================
 
 async def clear_memory(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-    """
-    Menghapus memory percakapan pada grup/chat tersebut.
-    """
 
     if not update.effective_chat:
         return
@@ -174,7 +147,6 @@ async def handle_message(
     if not text:
         return
 
-
     # ========================================================
     # BOT IDENTITY
     # ========================================================
@@ -182,60 +154,65 @@ async def handle_message(
     bot_username = context.bot.username
     bot_id = context.bot.id
 
-
     # ========================================================
-    # TRIGGER 1:
-    # USER MENTION BRE AI
+    # TRIGGER 1: MENTION
     # ========================================================
 
-    is_mentioned = (
-        f"@{bot_username.lower()}" in text.lower()
-    )
+    is_mentioned = False
 
+    if bot_username:
+        is_mentioned = (
+            f"@{bot_username.lower()}" in text.lower()
+        )
 
     # ========================================================
-    # TRIGGER 2:
-    # USER REPLY KE PESAN BRE AI
+    # TRIGGER 2: REPLY TO BRE AI
     # ========================================================
 
     is_reply_to_bot = False
-replied_message = None
+    replied_message = None
 
-if update.message.reply_to_message:
-    replied_message = update.message.reply_to_message
+    if update.message.reply_to_message:
 
-    if replied_message.from_user:
-        if replied_message.from_user.is_bot:
-            is_reply_to_bot = True
+        replied_message = update.message.reply_to_message
 
-        if (
-            bot_username
-            and replied_message.from_user.username
-            and replied_message.from_user.username.lower()
-            == bot_username.lower()
-        ):
-            is_reply_to_bot = True
+        if replied_message.from_user:
 
+            # Cara pertama: cek ID bot
+            if replied_message.from_user.id == bot_id:
+                is_reply_to_bot = True
+
+            # Cara kedua: cek username bot
+            if (
+                bot_username
+                and replied_message.from_user.username
+                and replied_message.from_user.username.lower()
+                == bot_username.lower()
+            ):
+                is_reply_to_bot = True
 
     # ========================================================
-    # CHAT BIASA
+    # DEBUG LOG
     # ========================================================
 
-    # Kalau bukan mention dan bukan reply ke Bre,
-    # Bre tidak ikut campur.
-    #
-    # Contoh:
-    #
-    # "Menurut gue Kallani keren."
-    #
-    # Bre diam.
+    print(
+        f"Message received | "
+        f"mentioned={is_mentioned} | "
+        f"reply_to_bot={is_reply_to_bot}"
+    )
+
+    # ========================================================
+    # IGNORE NORMAL CHAT
+    # ========================================================
 
     if not is_mentioned and not is_reply_to_bot:
+
+        print("⏭️ Ignored normal chat")
+
         return
 
-
     # ========================================================
-    # BERSIHKAN MENTION
+    # REMOVE BOT MENTION
     # ========================================================
 
     user_text = text
@@ -254,19 +231,9 @@ if update.message.reply_to_message:
 
         user_text = user_text.strip()
 
-
     # ========================================================
-    # KALAU REPLY KE BRE
+    # REPLY CONTEXT
     # ========================================================
-
-    # Kita beritahu AI bahwa user sedang membalas
-    # pesan Bre AI tertentu.
-    #
-    # Ini sangat membantu ketika user berkata:
-    #
-    # "Kalau 1.000 ha?"
-    #
-    # tanpa menjelaskan ulang konteksnya.
 
     if is_reply_to_bot and replied_message:
 
@@ -275,15 +242,14 @@ if update.message.reply_to_message:
         if replied_text:
 
             user_text = f"""
-USER SEDANG MEMBALAS PESAN BRE AI INI:
+PESAN BRE AI YANG SEDANG DIBALAS:
 
 {replied_text}
 
-PERTANYAAN / PESAN LANJUTAN USER:
+PESAN LANJUTAN USER:
 
 {user_text}
 """.strip()
-
 
     # ========================================================
     # EMPTY MESSAGE
@@ -297,16 +263,14 @@ PERTANYAAN / PESAN LANJUTAN USER:
 
         return
 
-
     # ========================================================
-    # GET CHAT ID
+    # CHAT ID
     # ========================================================
 
     chat_id = update.effective_chat.id
 
-
     # ========================================================
-    # BUILD CONTEXT
+    # BUILD MEMORY CONTEXT
     # ========================================================
 
     input_text = build_conversation_input(
@@ -314,25 +278,21 @@ PERTANYAAN / PESAN LANJUTAN USER:
         user_text
     )
 
-
     # ========================================================
     # OPENAI
     # ========================================================
 
     try:
 
+        print("🧠 Sending request to OpenAI...")
+
         response = client.responses.create(
-
             model="gpt-5.6",
-
             instructions=SYSTEM_PROMPT,
-
             input=input_text,
         )
 
-
         answer = response.output_text.strip()
-
 
         if not answer:
 
@@ -341,9 +301,8 @@ PERTANYAAN / PESAN LANJUTAN USER:
                 "dari model kali ini 😅"
             )
 
-
         # ====================================================
-        # SIMPAN USER MESSAGE KE MEMORY
+        # SAVE USER MESSAGE
         # ====================================================
 
         conversation_memory[chat_id].append({
@@ -351,9 +310,8 @@ PERTANYAAN / PESAN LANJUTAN USER:
             "content": user_text
         })
 
-
         # ====================================================
-        # SIMPAN JAWABAN BRE KE MEMORY
+        # SAVE AI ANSWER
         # ====================================================
 
         conversation_memory[chat_id].append({
@@ -361,9 +319,10 @@ PERTANYAAN / PESAN LANJUTAN USER:
             "content": answer
         })
 
+        print("✅ OpenAI response received")
 
         # ====================================================
-        # KIRIM JAWABAN
+        # SEND RESPONSE
         # ====================================================
 
         await send_long_message(
@@ -371,13 +330,9 @@ PERTANYAAN / PESAN LANJUTAN USER:
             answer
         )
 
-
     except Exception as e:
 
-        print(
-            "ERROR:",
-            repr(e)
-        )
+        print("ERROR:", repr(e))
 
         await update.message.reply_text(
             "Waduh bre, otak gue lagi error bentar 😂"
@@ -396,7 +351,6 @@ def main():
         .build()
     )
 
-
     # /clear
     app.add_handler(
         CommandHandler(
@@ -405,8 +359,7 @@ def main():
         )
     )
 
-
-    # Pesan biasa
+    # Message handler
     app.add_handler(
         MessageHandler(
             filters.TEXT & ~filters.COMMAND,
@@ -414,11 +367,9 @@ def main():
         )
     )
 
-
     print("🔥 Bre AI is running...")
     print("🧠 Conversation memory: ON")
     print("💬 Mention + Reply mode: ON")
-
 
     app.run_polling()
 
